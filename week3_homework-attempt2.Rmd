@@ -1,0 +1,285 @@
+---
+title: "Week 3 Homework Attempt 2"
+author: "Christy Choi"
+date: "2025-10-20"
+output: html_document
+---
+
+# Exam
+
+The task is to manipulate some raster data and produce some descriptive statistics. Climatic models fed into the latest Intergovernmental Panel on Climate Change (IPCC), the models are divided into Shared Socioeconomic Pathways known as SSPs, ranging from [SSP1](https://view.es-doc.org/?renderMethod=name&project=cmip6&type=cim.2.designing.NumericalExperiment&client=esdoc-url-rewrite&name=ssp126) (lots of mitigation and adaption) to [SSP5](https://view.es-doc.org/?renderMethod=name&project=cmip6&type=cim.2.designing.NumericalExperiment&client=esdoc-url-rewrite&name=ssp126) (fossil fuel development). The [Carbon Brief explainer](https://www.carbonbrief.org/explainer-how-shared-socioeconomic-pathways-explore-future-climate-change) has more information on the scenarios.
+
+For any country in the World produce descriptive statistics that show the difference in maximum temperature for key cities between SSP1 and SSP5 for the years 2081-2100, using any model and resolution.
+
+-   [WorldClim future projections](https://www.worldclim.org/data/cmip6/cmip6_clim2.5m.html)
+
+-   [Country outlines](https://gadm.org/data.html)
+
+-   [World city points](https://hub.arcgis.com/datasets/esri::world-cities/explore?location=3.049068%2C-178.464838%2C1.71)
+
+## First step always clear memory!!
+
+```{r}
+rm(list = ls()) #removes all objects from workspace
+gc() #clear memory
+```
+
+## Load Packages
+
+```{r}
+library(sf)
+library(here)
+library(janitor)
+library(tidyverse)
+library(terra)
+library(ggplot2)
+```
+
+## Load Geopackage
+
+```{r}
+# list all layers inside the geopackage to check!!
+st_layers(here::here("gadm41_GBR.gpkg"))
+```
+
+```{r}
+# read in the UK geopackage
+UK_country <- st_read(
+  here::here("gadm41_GBR.gpkg"),
+  layer='ADM_ADM_0')
+print(UK_country)
+```
+
+## Loading Data (.SHP)
+
+```{r}
+WorldCities <- st_read(
+  here::here("World_Cities", "World_Cities.shp"))
+```
+
+## Load Climate Rasters (tx - SSP126 and SSP585 file)
+
+This loads in 12 layers = Jan...Dec
+
+Remember to add .tif at the back of the file name
+
+SSP126:
+
+```{r}
+ssp1 <- terra::rast(
+  here::here("wc2.1_2.5m_tmax_ACCESS-CM2_ssp126_2081-2100.tif")
+  )
+```
+
+Calculate the monthly mean of daily max temperature across layers in SSP1
+
+```{r}
+ssp1_mean <- mean(ssp1)
+```
+
+SSP585:
+
+```{r}
+ssp5 <- terra::rast(
+  here::here("wc2.1_2.5m_tmax_ACCESS-CM2_ssp585_2081-2100.tif")
+  )
+```
+
+## Clean Data - Filter Cities
+
+```{r}
+UK_cities <- WorldCities %>%
+  janitor::clean_names()%>%
+  dplyr::filter(cntry_name=="United Kingdom")
+
+```
+
+```{r}
+ssp_diff <- ssp5-ssp1
+```
+
+## Crop and Mask Rasters
+
+```{r}
+# raster -> trim ssp1 down to the smallest rectangle that contains UK_country ploygon
+uk_diff1 <- ssp1 %>%
+  terra::crop(.,UK_country)
+```
+
+Remember to Crop first before you Mask, example as below!!
+
+Because: **crop** = cut to rectangle; **mask** = sculpt to the exact polygon.
+
+```{r}
+#sets all raster cells outside the UK polygon to be NA
+#output will give results of monthly tmax only over UK land area
+exact_uk1 <- uk_diff1 %>%
+  terra::mask(.,UK_country)
+```
+
+Perform the same step for SSP5:
+
+```{r}
+uk_diff5 <- ssp5 %>%
+  terra::crop(.,UK_country)
+```
+
+```{r}
+exact_uk5 <- uk_diff5 %>%
+  terra::mask(.,UK_country)
+```
+
+## Calculate Tmax Monthly Difference
+
+exact_uk1 = 12 layer SpatRaster (Jan...Dec) for SSP1 that is already cropped+masked to the UK
+
+exact_uk5 = 12 layer SpatRaster (Jan...Dec) for SSP5 that is already cropped+masked to the UK
+
+```{r}
+# To calculate how much warmer SSP5 is than SSP1 for each month
+# Subtract the rasters (SSP5-SSP1)
+diff_climate_model <- exact_uk5 - exact_uk1 
+
+# Name the layers by Month
+month <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+names(diff_climate_model) <- month
+```
+
+```{r}
+#terra::extract -> pulls values, bridge between raster and city points, so we: 
+# Extract one row per city, one column per month:
+uk_city_diff<- terra::extract(diff_climate_model, UK_cities)
+```
+
+## Join the extracted data back into the point dataset
+
+### THIS MATTERS because:
+
+1.  it takes city points table (uk_cities - as an sf object with geometry and attributes)
+2.  add a new column called join_id
+3.  fill it with unique integer per row from 1 to n() (number of cities)
+
+### THIS IS NEEDED because:
+
+Previous code `terra::extract()` returns a **plain data frame** with:
+
+-   an `ID` column (row index of the input points)
+
+-   one column per raster layer (e.g., `Jan`…`Dec`) with the extracted values.
+
+The results does not include original city attributes (name, admin, population...)/ geometry
+
+Therefore, the 'join' combines the extracted values back onto city points, so,
+
+renaming `ID → join_id` and doing a `left_join`, you safely attach the monthly ΔTmax values to the **same cities!!!!!!!!!!!!!!!**
+
+Creating a join ID column in the original point sf and use that to join:
+
+```{r}
+# Previous code returns data frame with a column for ID indicating the row number f the input point
+
+# Creating a join_id with the same row numbering, you can join extracted raster values back to city attributes: 
+
+UK_cities_join_ID <- UK_cities %>%
+  # mutate create a new column called join_id in simple squenial index - making a list of numbers starting at 1 to number of rows n()
+  dplyr::mutate(join_id= 1:n())
+```
+
+## Now Join!!
+
+### Join the extracted raster values back to the city points:
+
+```{r}
+#extract returns a plain table with an ID column (point row number) and 12 month columns.
+UK_city_diff2 <- UK_cities_join_ID%>%
+  dplyr::left_join(.,
+            uk_city_diff,
+             by = c("join_id" = "ID"))
+```
+
+### Drop geometry & keep only columns you need to plot:
+
+Either using Code 1 or Code 2 (safer way):
+
+Code 1 (directly selecting the columns for Jan -Dec (16:27)):
+
+```{r}
+city_climate_diff <- UK_city_diff2 %>%
+  dplyr::select(c(,16:27)) %>%   # (see note below)
+  sf::st_drop_geometry(.) %>%
+  dplyr::as_tibble()
+```
+
+Code 2 (safer way) :
+
+```{r}
+# Combine Jan-Dec into "month" first: 
+month <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+# Continue:
+city_climate_diff <- UK_city_diff2 %>%
+  dplyr::select(dplyr::any_of(month)) %>%     
+  #any_of() -> refers to selecting any of the names that exisit (skip any missing values)
+  sf::st_drop_geometry() %>%
+  #remove geometry column (we doing descriptive stats, non-spatial!!!)
+  tibble::as_tibble()
+  #convert/ turn the results into regular tibble!!
+```
+
+### Reshape to “tidy” long format for faceting
+
+Tidy the data into a long format, with only two columns: Month and Temp Diff, so that we can plot that out in next steps.
+
+```{r}
+tidy_city_diff <- city_climate_diff %>%
+  tidyr::pivot_longer(everything(),
+                      names_to = "Months",
+                      values_to = "temp_diff")
+```
+
+### Order the Months in order
+
+facet_plot (in ggplot2) -\> a set of multiples: the same type of plots repeated in separate panels, one panel per category
+
+-   to compare patterns across groups side-by-side with same axes and styling
+
+-   In this case we want to compare SSP5-SSP1 Temp Max across months so this will be a clear presentation!!
+
+```{r}
+facet_plot <- tidy_city_diff %>%
+  dplyr::mutate(Months = factor(Months,
+                                levels = c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")))
+
+# levels -> controls the display/ ordering of categories in plots!! so in this case it will follow the above Jan- Dec!!
+```
+
+### Faceted Histograms
+
+Distribution of city-level differences by month:
+
+Breakdown:
+
+1.  Start a ggplot using facet_plot with columns of Months and Temp Diff from previous
+2.  aes(x=temp_diff) sets global aesthetic mapping, “take the **values** in the column `temp_diff` and map them to the **x-axis**.”
+3.  na.rm=TRUE -\> does nothing in aes() -\> so, NA values will be ignored.
+4.  geom_histogram() -\> adds a histogram layer
+5.  labs() -\> sets title and axis labels
+6.  facet_grid(Months\~.) -\> Creates a **facet grid** with **rows = Months** and **one column** (`.~` means no column faceting)
+7.  Centre the plot title
+8.  Plot!!
+
+```{r}
+#facet_plot -> one row per city–month
+plot <- ggplot(facet_plot, aes(x = temp_diff, na.rm = TRUE)) +
+  geom_histogram(color = "black", binwidth = .1) +
+  labs(title = "Ggplot2 faceted difference in climate scenarios of max temp",
+       x = "Temperature",
+       y = "Frequency") +
+  facet_grid(Months ~ .) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot
+```
