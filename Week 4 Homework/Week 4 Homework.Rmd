@@ -1,0 +1,7 @@
+---
+title: "Week 4 Homework"
+author: "Christy Choi"
+date: "2025-10-26"
+output: html_document
+---
+
