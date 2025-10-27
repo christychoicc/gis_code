@@ -96,6 +96,8 @@ WorldCitiesiso3 <- WorldCities%>%
 
 ## Join Data (using left-join)
 
+-   Join WorldCitiesiso3 and GIIdata_clean!!!
+
 -   Remove all NA values
 
 -   Select the columns we need: Country, iso_code, GIIdiff and geometry
@@ -104,9 +106,9 @@ WorldCitiesiso3 <- WorldCities%>%
 joindata <- WorldCitiesiso3%>%
   left_join(.,
             GIIdata_clean, 
-            by= c("iso_code"= "iso3"))%>%
+            by= c("iso_code"= "iso3", "COUNTRY"="country"))%>%
   drop_na() %>%
-  select(c(1,5,9,10))%>%
+  select(c(1,5,8,9))%>%
   mutate(across(where(is.numeric), round, 2))
   #round all numeric values to 2 decimal places
 ```
