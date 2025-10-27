@@ -72,10 +72,17 @@ WorldCities <- st_read(
 
 ```{r}
 GIIdata_clean <- GIIdata %>%
-  janitor::clean_names()%>%
-  select(iso3, country, hdi_2010, hdi_2019)%>%
-  mutate(GIIdiff = hdi_2019 - hdi_2010)
+  janitor::clean_names() %>%
+  select(iso3, country, gii_2010, gii_2019) %>%
+  mutate(
+    gii_2010 = as.numeric(gii_2010),
+    gii_2019 = as.numeric(gii_2019),
+    gii_difference = gii_2019 - gii_2010
+  ) %>%
+  filter(!is.na(iso3), !is.na(gii_difference))
 ```
+
+GIIdata_clean \<- GIIdata %\>% janitor::clean_names()%\>% select(iso3, country, gii_2010, gii_2019)%\>% mutate(GIIdiff = gii_2019 - gii_2010)
 
 ## 4. Convert to ISO to ISO3 for WorldCities file
 
@@ -131,7 +138,7 @@ tmap_mode("view")
 ```{r}
 tm_shape(joindata) + 
   # add polygon layer
-  tm_polygons(fill="GIIdiff",
+  tm_polygons(fill="gii_difference",
               fill.scale= tm_scale_intervals(values="brewer.bu_pu",
                                               style="jenks"),
                                               fill_alpha=0.5,
