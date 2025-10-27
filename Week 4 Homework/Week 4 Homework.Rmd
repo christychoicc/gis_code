@@ -115,9 +115,13 @@ joindata <- WorldCitiesiso3%>%
             GIIdata_clean, 
             by= c("iso_code"= "iso3", "COUNTRY"="country"))%>%
   drop_na() %>%
-  select(c(1,5,8,9))%>%
   mutate(across(where(is.numeric), round, 2))
   #round all numeric values to 2 decimal places
+```
+
+```{r}
+joindata <- joindata%>%
+  select(c(5,8,9))
 ```
 
 ## Plot
